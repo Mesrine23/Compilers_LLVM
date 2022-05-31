@@ -83,6 +83,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
 //        System.out.println("IN FUNCTION");
 //        System.out.println("id: " + id);
 //        System.out.println("type: " + type);
+        info.put(id,type);
         return id + "~" + type;
     }
 
@@ -261,7 +262,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         else if (ret.equals("true"))
             System.out.println("\tret i1 1");
         else if (ret.equals("false"))
-            System.out.println("\tret i1 ");
+            System.out.println("\tret i1 0");
         else {  // identifier
             String[] temp = string_search_for_value(ret).split("~");
             ret = temp[0];
@@ -386,8 +387,30 @@ class llvmVisitor extends GJDepthFirst<String, String> {
      * f6 -> ";"
      */
     public String visit(ArrayAssignmentStatement n, String argu) throws Exception {
-        System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %" + n.f0.accept(this,null));
-        String address = "%_" + (assignCounter++);
+        String address=null;
+        String id = n.f0.accept(this, null);
+        if (current_class.equals(symbolTable.MainName)){
+            System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %" + id);
+            address = "%_" + (assignCounter++);
+        }
+        else {
+            if(local_variables.containsKey(id)) {
+                System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %" + id);
+                address = "%_" + (assignCounter++);
+            }
+            else {
+                LinkedList<String> vars = symbolTable.var_Table.get(current_class);
+                for (int i = 0; i < vars.size(); ++i) {
+                    if (vars.get(i).contains("." + id)) {
+                        System.out.println("\t%_" + (assignCounter++) + " = getelementptr i8, i8* %this, i32 " + (8 + symbolTable.cl_variable_offset.get(vars.get(i))));
+                        System.out.println("\t%_" + (assignCounter) + " = bitcast i8* %_" + ((assignCounter++) - 1) + " to i32**");
+                        System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %_" + (assignCounter-1));
+                        address = "%_" + (assignCounter++);
+                        break;
+                    }
+                }
+            }
+        }
         System.out.println("\t%_" + assignCounter + " = load i32, i32* %_" + (assignCounter-1));
         String size = "%_" + (assignCounter++);
         String index = n.f2.accept(this,null);
@@ -427,6 +450,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                 expr = temp[0];
             }
         }
+        info.put(ptr_to_store,"i32");
         System.out.println("\tstore i32 " + expr + ", i32* " + ptr_to_store + "\n");
         return null;
     }
@@ -441,8 +465,8 @@ class llvmVisitor extends GJDepthFirst<String, String> {
      * f6 -> Statement()
      */
     public String visit(IfStatement n, String argu) throws Exception {
-        String expr_reg = n.f2.accept(this,null);
         int if_stmnt = (this.if_stmnt++);
+        String expr_reg = n.f2.accept(this,null);
         if(expr_reg.equals("false")) {
             expr_reg = "0";
         }
@@ -496,8 +520,14 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         else {
             String cond;
             if (!expr.contains("%")) {
-                System.out.println("\t%_" + assignCounter + " = load i1, i1* %" + expr);
-                cond = "%_" + assignCounter++ ;
+                if(current_class.equals(symbolTable.MainName)) {
+                    System.out.println("\t%_" + assignCounter + " = load i1, i1* %" + expr);
+                    cond = "%_" + assignCounter++;
+                }
+                else {
+                    String[] temp = string_search_for_value(expr).split("~");
+                    cond = temp[0];
+                }
             }
             else
                 cond = expr;
@@ -629,8 +659,17 @@ class llvmVisitor extends GJDepthFirst<String, String> {
             if (!expr.contains("%")) { // identifier
                 LinkedList<String> key = new LinkedList<>();
                 key.add(expr);
-                key.add(current_class);
-                cl = symbolTable.varDecl.get(key);
+                key.add(symbolTable.MainName);
+                String varType = symbolTable.varDecl.get(key);
+                LinkedList<String> funs = new LinkedList<>();
+                funs = symbolTable.v_Table.get(varType);
+                for (int i=0; i < funs.size() ; ++i){
+                    if(funs.get(i).contains("."+fun)){
+                        String[] temp = funs.get(i).split("\\.");
+                        cl = temp[0];
+                        break;
+                    }
+                }
                 expr = "%" + expr;
                 System.out.println("\t%_" + assignCounter + " = load i8*, i8** " + expr);
                 obj_ptr = "%_" + (assignCounter++);
@@ -648,18 +687,30 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                     cl = local_variables.get(expr);
                 }
                 else {
-                    LinkedList<String> funs = symbolTable.v_Table.get(current_class);
-                    for (int i = 0; i < funs.size(); ++i) {
-                        if (funs.get(i).contains("." + fun)) {
-                            String[] temp1 = funs.get(i).split("\\.");
-                            cl = temp1[0];
-                            break;
+                    LinkedList<String> varInfo = new LinkedList<>();
+                    varInfo.add(expr);
+                    //System.out.println("added expr: " + expr);
+                    varInfo.add(current_class);
+                    //System.out.println("added class: " + current_class);
+                    cl = symbolTable.varDecl.get(varInfo);
+                    if(cl==null) {
+                        String[] mums = symbolTable.classOrder.get(current_class).split("-");
+                        for(int i=0 ; i < mums.length ; ++i){
+                            LinkedList<String> varInfo1 = new LinkedList<>();
+                            varInfo1.add(expr);
+                            //System.out.println("added expr: " + expr);
+                            varInfo1.add(mums[i]);
+                            //System.out.println("added class: " + current_class);
+                            cl = symbolTable.varDecl.get(varInfo1);
+                            if(cl!=null)
+                                break;
                         }
                     }
                 }
                 expr = "%" + expr;
             } else {
-                obj_ptr = "%this";
+                //System.out.println("(before %this) ~> expr: " + expr);
+                obj_ptr = expr;
                 LinkedList<String> funs = symbolTable.v_Table.get(current_class);
                 for (int i = 0; i < funs.size(); ++i) {
                     if (funs.get(i).contains("." + fun)) {
@@ -672,7 +723,6 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         }
         System.out.println("\t%_" + (assignCounter++) + " = bitcast i8* " + obj_ptr + " to i8***");
         System.out.println("\t%_" + (assignCounter) + " = load i8**, i8*** %_" + ((assignCounter++)-1));
-        //System.out.println(cl + "." + fun);
         String fun_type = symbolTable.fun_types.get(cl + "." + fun);
         //System.out.println(fun_type);
         if(fun_type.equals("int"))
@@ -762,7 +812,8 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                 index = "%" + index;
             }
             else {
-                index = string_search_for_value(index);
+                String[] temp = string_search_for_value(index).split("~");
+                index = temp[0];
             }
         }
         String array = n.f0.accept(this,null);
@@ -774,7 +825,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
             }
             else {
                 if(local_variables.containsKey(array)){
-                    System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** " + array);
+                    System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %" + array);
                     address = "%_" + (assignCounter++);
                 }
                 else {
@@ -783,7 +834,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                         if (vars.get(i).contains("." + array)) {
                             System.out.println("\t%_" + (assignCounter++) + " = getelementptr i8, i8* %this, i32 " + (8 + symbolTable.cl_variable_offset.get(vars.get(i))));
                             System.out.println("\t%_" + (assignCounter) + " = bitcast i8* %_" + ((assignCounter++) - 1) + " to i32**");
-                            System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** " + (assignCounter-1));
+                            System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %_" + (assignCounter-1));
                             address = "%_" + (assignCounter++);
                             break;
                         }
@@ -806,6 +857,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         System.out.println("\t%_" + (assignCounter++) + " = add i32 1, " + index);
         System.out.println("\t%_" + assignCounter + " = getelementptr i32, i32* " + address + ", i32 %_" + ((assignCounter++)-1));
         System.out.println("\t%_" + assignCounter + " = load i32, i32* %_" + (assignCounter-1));
+        info.put("%_" + assignCounter,"i32");
         return "%_" + (assignCounter++);
     }
 
@@ -818,11 +870,12 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         String array = n.f0.accept(this,null);
         if(!array.contains("%")) {
             if (current_class.equals(symbolTable.MainName)){
+                System.out.println("\t%_" + (assignCounter++) + " = load i32*, i32** " + array);
                 array = "%" + array;
             }
             else {
                 if(local_variables.containsKey(array)){
-                    System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** " + array);
+                    System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %" + array);
                     array = "%_" + (assignCounter++);
                 }
                 else {
@@ -831,7 +884,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                         if (vars.get(i).contains("." + array)) {
                             System.out.println("\t%_" + (assignCounter++) + " = getelementptr i8, i8* %this, i32 " + (8 + symbolTable.cl_variable_offset.get(vars.get(i))));
                             System.out.println("\t%_" + (assignCounter) + " = bitcast i8* %_" + ((assignCounter++) - 1) + " to i32**");
-                            System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** " + (assignCounter-1));
+                            System.out.println("\t%_" + (assignCounter) + " = load i32*, i32** %_" + (assignCounter-1));
                             array = "%_" + (assignCounter++);
                             break;
                         }
@@ -839,8 +892,8 @@ class llvmVisitor extends GJDepthFirst<String, String> {
                 }
             }
         }
-        System.out.println("\t%_" + (assignCounter++) + " = load i32*, i32** " + array);
         System.out.println("\t%_" + assignCounter + " = load i32, i32* %_" + (assignCounter-1));
+        info.put("%_"+assignCounter,"i32");
         return "%_" + (assignCounter++);
     }
 
@@ -987,7 +1040,7 @@ class llvmVisitor extends GJDepthFirst<String, String> {
         System.out.println("\t%_" + assignCounter + " = add i32 1, " + get);
         assignCounter++;
         System.out.println("\t%_" + assignCounter + " = icmp sge i32 %_" + (assignCounter-1) + ", 1");
-        System.out.println("\tbr i1 %_" + assignCounter + ", label %nsz_ok_0, label %nsz_err_" + (nsz) + "\n");
+        System.out.println("\tbr i1 %_" + assignCounter + ", label %nsz_ok_" + (nsz) +", label %nsz_err_" + (nsz) + "\n");
         System.out.println("\tnsz_err_" + (nsz) + ":\n\tcall void @throw_nsz()\n\tbr label %nsz_ok_" + (nsz) + "\n");
         System.out.println("\tnsz_ok_" + (nsz) + ":\n");
         this.nsz++;
