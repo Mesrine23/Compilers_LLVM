@@ -10,7 +10,7 @@ class Classes {
 
 		b = d;
 
-		System.out.println(b.set(3));
+		System.out.println(d.set(3));
 	}
 }
 

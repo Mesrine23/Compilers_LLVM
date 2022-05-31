@@ -25,6 +25,9 @@ public class Main {
             root.accept(eval, null);
 
             eval.symbolTable.Offsets();
+//            eval.symbolTable.printST();
+//            System.out.println();
+            //eval.symbolTable.print_llvm_vtables();
 
             llvmVisitor eval2 = new llvmVisitor(eval.symbolTable);
             root.accept(eval2,null);
